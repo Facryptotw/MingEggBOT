@@ -145,31 +145,44 @@ class TWSEService:
         if self._session and not self._session.closed:
             await self._session.close()
 
+    async def _fetch_json_with_retry(self, url: str, params: dict = None, max_retries: int = 3) -> dict | list | None:
+        """帶重試的 JSON 請求"""
+        session = await self._get_session()
+        for attempt in range(max_retries):
+            try:
+                async with session.get(url, params=params, ssl=False, timeout=10) as resp:
+                    text = await resp.text()
+                    if not text or text.startswith("<!"):
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(1)
+                            continue
+                        return None
+                    import json
+                    return json.loads(text)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+        return None
+
     # ── TWSE 處置股 ──
 
     async def fetch_disposition_list(self) -> list[DispositionStock]:
         """抓取上市處置股清單（使用 announcement/punish API）"""
-        session = await self._get_session()
         url = f"{TWSE_BASE_URL}/announcement/punish"
         params = {"response": "json"}
 
-        try:
-            async with session.get(url, params=params, ssl=False) as resp:
-                data = await resp.json(content_type=None)
-
-            if not data or "data" not in data or data.get("stat") != "OK":
-                return []
-
-            stocks = []
-            for row in data["data"]:
-                stock = self._parse_twse_disposition_row(row)
-                if stock:
-                    stocks.append(stock)
-            return stocks
-
-        except Exception as e:
-            print(f"[TWSE] 抓取處置股失敗: {e}")
+        data = await self._fetch_json_with_retry(url, params)
+        if not data or "data" not in data or data.get("stat") != "OK":
             return []
+
+        stocks = []
+        for row in data["data"]:
+            stock = self._parse_twse_disposition_row(row)
+            if stock:
+                stocks.append(stock)
+        return stocks
 
     def _parse_twse_disposition_row(self, row: list) -> Optional[DispositionStock]:
         """解析 announcement/punish 格式：編號,公布日期,證券代號,證券名稱,...,處置起迄時間"""
@@ -197,28 +210,20 @@ class TWSEService:
 
     async def fetch_tpex_disposition_list(self) -> list[DispositionStock]:
         """抓取上櫃處置股清單（使用 OpenAPI）"""
-        session = await self._get_session()
         url = f"{TPEX_BASE_URL}/openapi/v1/tpex_disposal_information"
 
-        try:
-            async with session.get(url, ssl=False) as resp:
-                data = await resp.json(content_type=None)
-
-            if not data or not isinstance(data, list):
-                return []
-
-            stocks = []
-            seen = set()
-            for item in data:
-                stock = self._parse_tpex_disposition_item(item)
-                if stock and stock.code not in seen:
-                    stocks.append(stock)
-                    seen.add(stock.code)
-            return stocks
-
-        except Exception as e:
-            print(f"[TPEX] 抓取處置股失敗: {e}")
+        data = await self._fetch_json_with_retry(url)
+        if not data or not isinstance(data, list):
             return []
+
+        stocks = []
+        seen = set()
+        for item in data:
+            stock = self._parse_tpex_disposition_item(item)
+            if stock and stock.code not in seen:
+                stocks.append(stock)
+                seen.add(stock.code)
+        return stocks
 
     def _parse_tpex_disposition_item(self, item: dict) -> Optional[DispositionStock]:
         """解析 TPEX OpenAPI 格式"""
@@ -251,27 +256,19 @@ class TWSEService:
 
     async def fetch_twse_warning_stocks(self) -> list[WarningStock]:
         """抓取上市注意股累計狀況（notetrans API）"""
-        session = await self._get_session()
         url = f"{TWSE_BASE_URL}/announcement/notetrans"
         params = {"response": "json"}
 
-        try:
-            async with session.get(url, params=params, ssl=False) as resp:
-                data = await resp.json(content_type=None)
-
-            if not data or "data" not in data:
-                return []
-
-            stocks = []
-            for row in data["data"]:
-                stock = self._parse_twse_warning_row(row)
-                if stock:
-                    stocks.append(stock)
-            return stocks
-
-        except Exception as e:
-            print(f"[TWSE] 抓取注意股累計失敗: {e}")
+        data = await self._fetch_json_with_retry(url, params)
+        if not data or "data" not in data:
             return []
+
+        stocks = []
+        for row in data["data"]:
+            stock = self._parse_twse_warning_row(row)
+            if stock:
+                stocks.append(stock)
+        return stocks
 
     def _parse_twse_warning_row(self, row: list) -> Optional[WarningStock]:
         """解析 notetrans 格式：編號,證券代號,證券名稱,累計情形"""
@@ -298,28 +295,20 @@ class TWSEService:
 
     async def fetch_tpex_warning_stocks(self) -> list[WarningStock]:
         """抓取上櫃注意股累計狀況"""
-        session = await self._get_session()
         url = f"{TPEX_BASE_URL}/openapi/v1/tpex_trading_warning_note"
 
-        try:
-            async with session.get(url, ssl=False) as resp:
-                data = await resp.json(content_type=None)
-
-            if not data or not isinstance(data, list):
-                return []
-
-            stocks = []
-            seen = set()
-            for item in data:
-                stock = self._parse_tpex_warning_item(item)
-                if stock and stock.code not in seen:
-                    stocks.append(stock)
-                    seen.add(stock.code)
-            return stocks
-
-        except Exception as e:
-            print(f"[TPEX] 抓取注意股累計失敗: {e}")
+        data = await self._fetch_json_with_retry(url)
+        if not data or not isinstance(data, list):
             return []
+
+        stocks = []
+        seen = set()
+        for item in data:
+            stock = self._parse_tpex_warning_item(item)
+            if stock and stock.code not in seen:
+                stocks.append(stock)
+                seen.add(stock.code)
+        return stocks
 
     def _parse_tpex_warning_item(self, item: dict) -> Optional[WarningStock]:
         """解析 TPEX warning_note 格式"""
