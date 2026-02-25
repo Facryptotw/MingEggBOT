@@ -381,74 +381,62 @@ class TWSEService:
         all_stocks = twse_list + tpex_list
         return sorted(all_stocks, key=lambda x: x.days_until_disposition)
 
-    # ── 股價 ──
+    # ── 股價（使用 Yahoo Finance，支援上市+上櫃） ──
 
-    async def fetch_stock_price(self, code: str, date: datetime) -> Optional[float]:
-        """取得指定日期的收盤價（上市）"""
+    async def fetch_stock_prices_yahoo(
+        self, code: str, market: str, days: int = 90
+    ) -> dict[str, float]:
+        """
+        使用 Yahoo Finance API 取得歷史收盤價
+        market: "twse" -> .TW, "tpex" -> .TWO
+        返回 {date_str: price}
+        """
         session = await self._get_session()
-        date_str = date.strftime("%Y%m%d")
-        url = f"{TWSE_BASE_URL}/rwd/zh/afterTrading/STOCK_DAY"
-        params = {"date": date_str, "stockNo": code, "response": "json"}
+        suffix = ".TW" if market == "twse" else ".TWO"
+        symbol = f"{code}{suffix}"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        params = {"interval": "1d", "range": f"{days}d"}
 
+        prices = {}
         try:
             async with session.get(url, params=params, ssl=False) as resp:
                 data = await resp.json(content_type=None)
 
-            if not data or "data" not in data:
-                return None
+            if not data or "chart" not in data:
+                return prices
 
-            for row in reversed(data["data"]):
-                try:
-                    close_price = float(row[6].replace(",", ""))
-                    return close_price
-                except (ValueError, IndexError):
-                    continue
-            return None
+            result = data["chart"].get("result", [])
+            if not result:
+                return prices
+
+            timestamps = result[0].get("timestamp", [])
+            quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
+            closes = quotes.get("close", [])
+
+            for ts, close in zip(timestamps, closes):
+                if close is not None:
+                    dt = datetime.fromtimestamp(ts)
+                    prices[dt.strftime("%Y-%m-%d")] = float(close)
 
         except Exception as e:
-            print(f"[TWSE] 抓取股價失敗 {code}: {e}")
-            return None
-
-    async def fetch_stock_prices_range(
-        self, code: str, start: datetime, end: datetime
-    ) -> dict[str, float]:
-        """取得日期區間的收盤價 {date_str: price}"""
-        prices = {}
-        current = datetime(start.year, start.month, 1)
-        end_month = datetime(end.year, end.month, 1)
-
-        while current <= end_month:
-            session = await self._get_session()
-            date_str = current.strftime("%Y%m%d")
-            url = f"{TWSE_BASE_URL}/rwd/zh/afterTrading/STOCK_DAY"
-            params = {"date": date_str, "stockNo": code, "response": "json"}
-
-            try:
-                async with session.get(url, params=params, ssl=False) as resp:
-                    data = await resp.json(content_type=None)
-
-                if data and "data" in data:
-                    for row in data["data"]:
-                        try:
-                            roc_date_str = row[0].strip()
-                            close_price = float(row[6].replace(",", ""))
-                            d = self._parse_roc_date(roc_date_str)
-                            if d and start <= d <= end:
-                                prices[d.strftime("%Y-%m-%d")] = close_price
-                        except (ValueError, IndexError):
-                            continue
-
-            except Exception as e:
-                print(f"[TWSE] 抓取股價區間失敗 {code}: {e}")
-
-            if current.month == 12:
-                current = datetime(current.year + 1, 1, 1)
-            else:
-                current = datetime(current.year, current.month + 1, 1)
-
-            await asyncio.sleep(0.5)
+            print(f"[YAHOO] 抓取股價失敗 {code}: {e}")
 
         return prices
+
+    async def fetch_stock_prices_range(
+        self, code: str, start: datetime, end: datetime, market: str = "twse"
+    ) -> dict[str, float]:
+        """取得日期區間的收盤價 {date_str: price}"""
+        days_needed = (datetime.now() - start).days + 10
+        all_prices = await self.fetch_stock_prices_yahoo(code, market, days=max(days_needed, 30))
+        
+        filtered = {}
+        for date_str, price in all_prices.items():
+            d = datetime.strptime(date_str, "%Y-%m-%d")
+            if start <= d <= end:
+                filtered[date_str] = price
+        
+        return filtered
 
     # ── 高階方法：組合資料 ──
 
@@ -492,17 +480,17 @@ class TWSEService:
         return sorted(exiting, key=lambda x: x.remaining_days)
 
     async def _fill_price_change(self, stock: ExitingStock):
-        """填入處置前/處置中漲跌幅"""
+        """填入處置前/處置中漲跌幅（使用 Yahoo Finance）"""
         try:
             disp_days = (stock.end_date - stock.start_date).days
             before_start = stock.start_date - timedelta(days=disp_days + 10)
             before_end = stock.start_date - timedelta(days=1)
 
             before_prices = await self.fetch_stock_prices_range(
-                stock.code, before_start, before_end
+                stock.code, before_start, before_end, market=stock.market
             )
             during_prices = await self.fetch_stock_prices_range(
-                stock.code, stock.start_date, datetime.now()
+                stock.code, stock.start_date, datetime.now(), market=stock.market
             )
 
             if before_prices:
