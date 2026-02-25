@@ -440,13 +440,30 @@ class TWSEService:
 
     # ── 高階方法：組合資料 ──
 
+    @staticmethod
+    def _is_normal_stock(code: str, name: str) -> bool:
+        """判斷是否為一般股票（排除 CB、權證等）"""
+        if not code or not name:
+            return False
+        # 排除名字結尾是「一」「二」「三」「四」「五」...的（公司債）
+        cb_suffixes = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+        for suffix in cb_suffixes:
+            if name.endswith(suffix):
+                return False
+        # 排除名字包含「甲」「乙」「丙」特別股
+        if name.endswith("甲") or name.endswith("乙") or name.endswith("丙"):
+            return False
+        return True
+
     async def get_all_dispositions(self) -> list[DispositionStock]:
-        """取得上市 + 上櫃所有處置股"""
+        """取得上市 + 上櫃所有處置股（排除 CB/權證）"""
         twse_list, tpex_list = await asyncio.gather(
             self.fetch_disposition_list(),
             self.fetch_tpex_disposition_list(),
         )
-        return twse_list + tpex_list
+        all_stocks = twse_list + tpex_list
+        # 過濾只保留一般股票（排除公司債、特別股）
+        return [s for s in all_stocks if self._is_normal_stock(s.code, s.name)]
 
     async def get_active_dispositions(self) -> list[DispositionStock]:
         """取得目前正在處置中的股票"""

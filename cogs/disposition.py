@@ -147,10 +147,7 @@ class DispositionCog(commands.Cog):
             return embed
 
         lines = []
-        # 過濾掉 CB/權證（代號超過5位數）
-        normal_stocks = [s for s in stocks if len(s.code) <= 5]
-        
-        for s in normal_stocks[:12]:
+        for s in stocks[:12]:
             exit_date = s.end_date.strftime("%m/%d")
             
             # 如果處置前後都是 0，視為無資料
@@ -191,20 +188,17 @@ class DispositionCog(commands.Cog):
 
     def _build_active_embed(self, stocks: list[DispositionStock]) -> discord.Embed:
         """還能噴嗎 - 正在處置的股票"""
-        # 過濾掉 CB/權證（代號超過5位數）
-        normal_stocks = [s for s in stocks if len(s.code) <= 5]
-        
         embed = discord.Embed(
-            title=f"⚡ 還能噴嗎？{len(normal_stocks)} 檔股票正在處置",
+            title=f"⚡ 還能噴嗎？{len(stocks)} 檔股票正在處置",
             color=0x8B5CF6,
         )
 
-        if not normal_stocks:
+        if not stocks:
             embed.description = "目前無正在處置的股票"
             return embed
 
         lines = []
-        sorted_stocks = sorted(normal_stocks, key=lambda x: x.remaining_days)
+        sorted_stocks = sorted(stocks, key=lambda x: x.remaining_days)
         
         for s in sorted_stocks[:20]:
             start_str = s.start_date.strftime("%m/%d")
