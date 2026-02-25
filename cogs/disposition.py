@@ -147,31 +147,41 @@ class DispositionCog(commands.Cog):
             return embed
 
         lines = []
-        for s in stocks[:12]:
+        # 過濾掉 CB/權證（代號超過5位數）
+        normal_stocks = [s for s in stocks if len(s.code) <= 5]
+        
+        for s in normal_stocks[:12]:
             exit_date = s.end_date.strftime("%m/%d")
             
-            before_sign = "+" if s.price_before_pct >= 0 else ""
-            during_sign = "+" if s.price_during_pct >= 0 else ""
+            # 如果處置前後都是 0，視為無資料
+            has_data = not (s.price_before_pct == 0 and s.price_during_pct == 0)
+            
+            if has_data:
+                before_sign = "+" if s.price_before_pct >= 0 else ""
+                during_sign = "+" if s.price_during_pct >= 0 else ""
 
-            tag = s.tag
-            if tag == "妖股誕生":
-                tag_icon = "🔥👹"
-                tag_text = "妖股誕生"
-            elif tag == "強勢突圍":
-                tag_icon = "🔥"
-                tag_text = "強勢突圍"
-            elif tag == "人去樓空":
-                tag_icon = "👻"
-                tag_text = "人去樓空"
-            elif tag == "走勢疲軟":
-                tag_icon = "📉"
-                tag_text = "走勢疲軟"
+                tag = s.tag
+                if tag == "妖股誕生":
+                    tag_icon = "🔥👹"
+                    tag_text = "妖股誕生"
+                elif tag == "強勢突圍":
+                    tag_icon = "🔥"
+                    tag_text = "強勢突圍"
+                elif tag == "人去樓空":
+                    tag_icon = "👻"
+                    tag_text = "人去樓空"
+                elif tag == "走勢疲軟":
+                    tag_icon = "📉"
+                    tag_text = "走勢疲軟"
+                else:
+                    tag_icon = "🤔"
+                    tag_text = "多空膠著"
+
+                lines.append(f"**{s.code} {s.name}**｜剩 {s.remaining_days} 天 ({exit_date})")
+                lines.append(f"▸ {tag_icon} {tag_text} 處置前{before_sign}{s.price_before_pct}% / 處置中{during_sign}{s.price_during_pct}%")
             else:
-                tag_icon = "🤔"
-                tag_text = "多空膠著"
-
-            lines.append(f"**{s.code} {s.name}**｜剩 {s.remaining_days} 天 ({exit_date})")
-            lines.append(f"▸ {tag_icon} {tag_text} 處置前{before_sign}{s.price_before_pct}% / 處置中{during_sign}{s.price_during_pct}%")
+                lines.append(f"**{s.code} {s.name}**｜剩 {s.remaining_days} 天 ({exit_date})")
+                lines.append(f"▸ 📊 股價資料不足")
             lines.append("")
 
         embed.description = "\n".join(lines)
@@ -181,17 +191,20 @@ class DispositionCog(commands.Cog):
 
     def _build_active_embed(self, stocks: list[DispositionStock]) -> discord.Embed:
         """還能噴嗎 - 正在處置的股票"""
+        # 過濾掉 CB/權證（代號超過5位數）
+        normal_stocks = [s for s in stocks if len(s.code) <= 5]
+        
         embed = discord.Embed(
-            title=f"⚡ 還能噴嗎？{len(stocks)} 檔股票正在處置",
+            title=f"⚡ 還能噴嗎？{len(normal_stocks)} 檔股票正在處置",
             color=0x8B5CF6,
         )
 
-        if not stocks:
+        if not normal_stocks:
             embed.description = "目前無正在處置的股票"
             return embed
 
         lines = []
-        sorted_stocks = sorted(stocks, key=lambda x: x.remaining_days)
+        sorted_stocks = sorted(normal_stocks, key=lambda x: x.remaining_days)
         
         for s in sorted_stocks[:20]:
             start_str = s.start_date.strftime("%m/%d")
