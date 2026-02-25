@@ -34,17 +34,26 @@ class DispositionCog(commands.Cog):
 
     @app_commands.command(name="disposition", description="📊 查看台股處置股即時監控報告")
     async def disposition_command(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True)
+        try:
+            await interaction.response.defer(thinking=True)
+        except discord.errors.NotFound:
+            return
+        except Exception as e:
+            print(f"[CMD] defer 失敗: {e}")
+            return
 
         try:
             embeds = await self._build_embeds()
             await interaction.followup.send(embeds=embeds)
         except Exception as e:
             traceback.print_exc()
-            await interaction.followup.send(
-                f"❌ 報告生成失敗：{str(e)[:200]}",
-                ephemeral=True,
-            )
+            try:
+                await interaction.followup.send(
+                    f"❌ 報告生成失敗：{str(e)[:200]}",
+                    ephemeral=True,
+                )
+            except:
+                pass
 
     # ── 每日排程 ──
 
